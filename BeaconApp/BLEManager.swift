@@ -1,63 +1,118 @@
 import Foundation
 import CoreBluetooth
+import UIKit
 
-@objc class BLEManager: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate
+class BLEManager: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate
 {
+    // BLE
     var centralManager: CBCentralManager!
     let dispatchQueue = DispatchQueue(label:"CBqueue")
-    
+    let plotQueue = DispatchQueue(label: "Plot")
+    var discoveredPeripheralNames = Array<String>()
+    var discoveredPeripherals = Array<CBPeripheral>()
     var connectingPeripheral: CBPeripheral!
     var connectingUUID: CBUUID?
     var subscribedUUID: CBUUID?
+    var isConnected: Bool = false
+    var isSetup: Bool = false
+    var isInBackground: Bool = false
     
-    @objc public func setup()
-    {
-        centralManager = CBCentralManager(delegate: self, queue: dispatchQueue)
-    }
-    
-    @objc public func scanForDevices(timeOut: Double) {
-        // scan, then stop after timeOut
-        centralManager.scanForPeripherals(withServices: nil, options: nil)
+    public func setup() {
+        centralManager = CBCentralManager(delegate: self, queue: dispatchQueue, options: [CBCentralManagerOptionRestoreIdentifierKey : "Capstone"])
+        isSetup = true
         
-        dispatchQueue.asyncAfter(deadline: .now() + timeOut, execute: {
-            self.centralManager.stopScan()
-//            self.bridge.onScanComplete();
+        NotificationCenter.default.addObserver(forName: NSNotification.Name.init("haptic"), object: nil, queue: OperationQueue.main, using: { (notification) in
+            let byteArray = NSData(bytes: [0xFF, 0x64] as [UInt8], length: 2)
+            self.writeToCharacteristic(device_uuid: self.connectingUUID!, service_uuid: CBUUID(string: "6E400001-B5A3-F393-E0A9-E50E24DCCA9E"), characteristic_uuid: CBUUID(string: "6E400002-B5A3-F393-E0A9-E50E24DCCA9E"), bytes: byteArray as Data)
+        })
+        
+        NotificationCenter.default.addObserver(forName: NSNotification.Name.init("stop"), object: nil, queue: OperationQueue.main, using: { (notification) in
+            let byteArray = NSData(bytes: [0x00, 0x00] as [UInt8], length: 2)
+            self.writeToCharacteristic(device_uuid: self.connectingUUID!, service_uuid: CBUUID(string: "6E400001-B5A3-F393-E0A9-E50E24DCCA9E"), characteristic_uuid: CBUUID(string: "6E400002-B5A3-F393-E0A9-E50E24DCCA9E"), bytes: byteArray as Data)
+        })
+        
+        NotificationCenter.default.addObserver(forName: NSNotification.Name.init("background"), object: nil, queue: OperationQueue.main, using: { (notification) in
+            self.isInBackground = notification.object as! Bool
+            print("isInBackground: \(self.isInBackground)")
         })
     }
-
-    public func scanForDevices(uuid: CBUUID) {
-        centralManager.scanForPeripherals(withServices: nil, options: nil)
+    
+    // ScanView Callbacks
+    typealias ScanCallback = (Bool) -> Void
+    var connectCallback: ScanCallback?
+    typealias DiscoverCallback = (String) -> Void
+    var discoverCallback: DiscoverCallback?
+    typealias DisconnectCallback = () -> Void
+    var disconnectCallback: DisconnectCallback?
+    
+    // Alerts
+    func showAlert(message: String) {
+        DispatchQueue.main.async {
+            let controller = UIAlertController(title: "Alert", message: message, preferredStyle: .alert)
+            let dismissAction = UIAlertAction(title: "Dismiss", style: .default, handler: nil)
+            controller.addAction(dismissAction)
+            UIApplication.shared.keyWindow?.rootViewController?.present(controller, animated: true, completion: nil)
+        }
     }
     
-    public func connectToDevice(device: CBPeripheral) {
-        device.delegate = self
-        self.connectingPeripheral = device
-        centralManager.connect(connectingPeripheral, options: nil)
+    public func scanForDevices(timeOut: Double, discovered: @escaping (String) -> Void) {
+        self.discoverCallback = discovered
+        centralManager.scanForPeripherals(withServices: [CBUUID(string:
+            // Nordic BLE service
+            "6E400001-B5A3-F393-E0A9-E50E24DCCA9E")], options: nil)
+        
+        // Stop scan after timeout
+        dispatchQueue.asyncAfter(deadline: .now() + timeOut, execute: {
+            self.centralManager.stopScan()
+        })
+        
     }
     
-    @objc public func populateServices(uuid: CBUUID) {
+    public func scanForDevices() {
+        centralManager.scanForPeripherals(withServices: [CBUUID(string:
+            "6E400001-B5A3-F393-E0A9-E50E24DCCA9E")], options: nil)
+    }
+    
+    var intentToConnect: Bool = false
+    var intendedName: String?
+    func connectToDevice(name: String, connect: @escaping (Bool) -> Void, disconnect: @escaping () -> Void) {
+        self.connectCallback = connect
+        self.disconnectCallback = disconnect
+        
+        intentToConnect = true
+        intendedName = name
+        
+        self.scanForDevices()
+    }
+    
+    public func populateServices(uuid: CBUUID) {
         connectingUUID = uuid
-        scanForDevices(uuid: uuid);
+        scanForDevices()
     }
     
-    @objc public func readFromCharacteristic(device_uuid: CBUUID, service_uuid: CBUUID, characteristic_uuid: CBUUID) {
-        if (connectingUUID == device_uuid) {
-            for service in connectingPeripheral.services! {
-                if service.uuid == service_uuid {
-                    for characteristic in service.characteristics! {
-                        if characteristic.uuid == characteristic_uuid {
-                            connectingPeripheral.readValue(for: characteristic)
+    public func readFromCharacteristic(device: CBPeripheral, service: CBUUID, characteristic: CBUUID) -> Data {
+        var readValue = Data()
+        for cb_service in device.services! {
+            if cb_service.uuid == service {
+                for cb_characteristic in cb_service.characteristics! {
+                    if cb_characteristic.uuid == characteristic {
+                        if (cb_characteristic.value != nil) {
+                            readValue = cb_characteristic.value!
+                        }
+                        else {
+                            print("Characteristic value is nil")
                         }
                     }
                 }
             }
         }
+        return readValue
     }
     
     var intentToNotify = false
-    @objc public func subscribeToNotifications(device_uuid: CBUUID, service_uuid: CBUUID, characteristic_uuid: CBUUID) {
+    public func subscribeToNotifications(device_uuid: CBUUID, service_uuid: CBUUID, characteristic_uuid: CBUUID) {
         if (connectingUUID == device_uuid) {
-//            bridge.onConnect()
+            // TODO: ScanView, device connected
             for service in connectingPeripheral.services! {
                 if (service.uuid == service_uuid) {
                     var gotCharacteristic = false
@@ -68,35 +123,30 @@ import CoreBluetooth
                                 intentToNotify = true
                                 connectingPeripheral.setNotifyValue(true, for: characteristic)
                             } else {
-//                                bridge.onNotificationsUnsupported()
+                                showAlert(message: "BLE notifications unsupported for characteristic")
                             }
                         }
                     }
                     if (!gotCharacteristic) {
-//                        bridge.onNoCharacteristic()
+                        showAlert(message: "Could not find required BLE characteristic")
                     }
                 }
             }
         }
         else {
-//            bridge.onNoConnect()
+            showAlert(message: "Failed to connect device")
         }
     }
     
-    var intentToUnsubscribe = false
-    @objc public func unsubscribeToNotifications() {
-        for service in connectingPeripheral.services! {
-            for characteristic in service.characteristics! {
-                if (characteristic.uuid == subscribedUUID) {
-                    intentToUnsubscribe = true
-                    connectingPeripheral.setNotifyValue(false, for: characteristic)
-                }
-            }
-        }
+    var intentToDisconnect = false
+    public func disconnect() {
+        intentToDisconnect = true
+        centralManager.cancelPeripheralConnection(connectingPeripheral)
     }
     
+    // TODO: Haptics
     var intentToWrite = false
-    @objc public func writeToCharacteristic(device_uuid: CBUUID, service_uuid: CBUUID, characteristic_uuid: CBUUID, bytes: Data) {
+    public func writeToCharacteristic(device_uuid: CBUUID, service_uuid: CBUUID, characteristic_uuid: CBUUID, bytes: Data) {
         if (connectingUUID == device_uuid) {
             for service in connectingPeripheral.services! {
                 if (service.uuid == service_uuid) {
@@ -105,10 +155,11 @@ import CoreBluetooth
                         if (characteristic.uuid == characteristic_uuid) {
                             gotCharacteristic = true
                             if (!characteristic.properties.contains(CBCharacteristicProperties.write)) {
-//                                bridge.onWriteFail()
+                                showAlert(message: "Write to BLE characteristic failed")
                             } else if (characteristic.properties.contains(CBCharacteristicProperties.writeWithoutResponse)) {
                                 intentToWrite = true
                                 connectingPeripheral.writeValue(bytes, for: characteristic, type: CBCharacteristicWriteType.withoutResponse)
+                                connectingPeripheral.readValue(for: characteristic)
                             } else {
                                 intentToWrite = true
                                 connectingPeripheral.writeValue(bytes, for: characteristic, type: CBCharacteristicWriteType.withResponse)
@@ -116,7 +167,7 @@ import CoreBluetooth
                         }
                     }
                     if (!gotCharacteristic) {
-//                        bridge.onWriteFail()
+                        showAlert(message: "Write to BLE characteristic failed")
                     }
                 }
             }
@@ -125,114 +176,114 @@ import CoreBluetooth
     
     // MARK: - centralManagerDelegate
     
-    @objc open func centralManagerDidUpdateState(_ central: CBCentralManager) {
+    open func centralManagerDidUpdateState(_ central: CBCentralManager) {
         switch central.state {
         case .poweredOn:
             print("poweredOn")
-//            bridge.onCbState("poweredOn")
         case .poweredOff:
             print("poweredOff")
-//            bridge.onCbState("poweredOff")
         case .unsupported:
-            print("poweredOn")
-//            bridge.onCbState
+            print("unsupported")
         case .unknown:
             print("unknown")
-//            bridge.onCbState("unknown")
         case .resetting:
             print("resetting")
-//            bridge.onCbState("resetting")
         case .unauthorized:
             print("unauthorized")
-//            bridge.onCbState("unauthorized")
         @unknown default:
-            print("fatal error")
-            fatalError()
+            print("error")
         }
     }
     
-    public func centralManager(_ central: CBCentralManager, didDiscover peripheral: CBPeripheral, advertisementData: [String : Any], rssi RSSI: NSNumber) {
-        if (connectingUUID == nil) {
-            if (peripheral.name == nil){
-//                bridge.onDeviceDiscovered("<no name>", uuid:peripheral.identifier.uuidString)
+    func centralManager(_ central: CBCentralManager, didDiscover peripheral: CBPeripheral, advertisementData: [String : Any], rssi RSSI: NSNumber) {
+        let name = peripheral.name ?? "<no name>"
+        
+        if (intentToConnect) {
+            if name == self.intendedName {
+                peripheral.delegate = self
+                self.connectingPeripheral = peripheral
+                self.connectingUUID = CBUUID(string: peripheral.identifier.uuidString)
+                centralManager.connect(peripheral, options: nil)
+                intentToConnect = false
             }
-            else{
-//                bridge.onDeviceDiscovered(peripheral.name, uuid:peripheral.identifier.uuidString)
-            }
-        }
-        else {
-            if (peripheral.identifier.uuidString == connectingUUID?.uuidString) {
-                connectToDevice(device: peripheral)
-                centralManager.stopScan()
-            }
+        } else {
+            self.discoveredPeripheralNames.append(name)
+            self.discoveredPeripherals.append(peripheral)
+            self.discoverCallback!(name)
         }
     }
-    
-    // didConnect gets called twice for some reason so we use this bool
-    var alreadyConnected = false;
-    public func centralManager(_ central: CBCentralManager, didConnect peripheral: CBPeripheral) {
-        if(!alreadyConnected){
-            peripheral.discoverServices(nil)
-            alreadyConnected = true
-        }
-        else{
-            alreadyConnected = false
-        }
+
+    // TODO: ScanView, connection success
+    func centralManager(_ central: CBCentralManager, didConnect peripheral: CBPeripheral) {
+        self.isConnected = true
+        self.connectCallback!(true)
+        peripheral.discoverServices(nil)
     }
     
-    public func centralManager(_ central: CBCentralManager, didFailToConnect peripheral: CBPeripheral, error: Error?) {
-//        bridge.onNoConnect()
+    func centralManager(_ central: CBCentralManager, didFailToConnect peripheral: CBPeripheral, error: Error?) {
+        showAlert(message: "Failed to connect device")
     }
     
-    public func centralManager(_ central: CBCentralManager, didDisconnectPeripheral peripheral: CBPeripheral, error: Error?) {
-        connectingPeripheral = nil
-        connectingUUID = nil
-//        bridge.onDisconnect()
+    func centralManager(_ central: CBCentralManager, didDisconnectPeripheral peripheral: CBPeripheral, error: Error?) {
+        self.isConnected = false
+        
+        if (intentToDisconnect) {
+            connectingPeripheral = nil
+            connectingUUID = nil
+            
+            self.disconnectCallback!()
+            
+            showAlert(message: "Disconnected from device")
+            intentToDisconnect = false
+        } else {
+            centralManager.connect(peripheral, options: nil)
+        }
+        // TODO: Cleanup on disconnect in here, AppDelegate and Views
+    }
+    
+    public func centralManager(_ central: CBCentralManager, willRestoreState dict: [String : Any]) {
+        self.centralManager = central
+        self.centralManager.delegate = self
     }
     
     // MARK: - peripheralDelegate
-
-    var serviceCounter = 0
+    
     public func peripheral(_ peripheral: CBPeripheral, didDiscoverServices error: Error?) {
         for service in peripheral.services! {
             peripheral.discoverCharacteristics(nil, for: service)
-            serviceCounter += 1
         }
     }
     
-    // keep an array of populated CBServices to send all populated services at once
-    var services = [CBService]()
     public func peripheral(_ peripheral: CBPeripheral, didDiscoverCharacteristicsFor service: CBService, error: Error?) {
-        serviceCounter -= 1
-        
-        services.append(service)
-        
-        if (serviceCounter == 0) {
-//            bridge.onServicesPopulated(services)
+        for characteristic in service.characteristics! {
+            // subscribe to Nordic Service
+            if (characteristic.uuid.uuidString == "6E400003-B5A3-F393-E0A9-E50E24DCCA9E") {
+                peripheral.setNotifyValue(true, for: characteristic)
+                self.subscribedUUID = CBUUID(string: "6E400003-B5A3-F393-E0A9-E50E24DCCA9E")
+            }
         }
     }
+    
+    var latencies: Array<Double> = Array(repeating: 0, count: 50)
+    var lastTimestamp : Double = 0
+    
+    var timestamps = Array<Double>()
+    
+    var rawData0 = Array<Double>()
+    var rawData1 = Array<Double>()
+    
+    var filteredData0 = Array<Double>()
+    var filteredData1 = Array<Double>()
+    
+    var fftData0 = [Array<Double>(), Array<Double>()]
+    var fftData1 = [Array<Double>(), Array<Double>()]
+    
+    var imuData0 = Array<Array<Double>>()
+    var imuData1 = Array<Array<Double>>()
+    
+    var count = 1
     
     public func peripheral(_ peripheral: CBPeripheral, didUpdateValueFor characteristic: CBCharacteristic, error: Error?) {
-        if (intentToWrite) {
-//            bridge.onWriteSuccess()
-            intentToWrite = false
-        } else if (characteristic.isNotifying) {
-//            bridge.onValueChanged(characteristic.value)
-        } else {
-//            bridge.onRead(characteristic.value)
-        }
-    }
-    
-    public func peripheral(_ peripheral: CBPeripheral, didUpdateNotificationStateFor characteristic: CBCharacteristic, error: Error?) {
-        if (intentToUnsubscribe) {
-            centralManager.cancelPeripheralConnection(connectingPeripheral)
-            intentToUnsubscribe = false
-            subscribedUUID = nil
-        } else if (intentToNotify && !characteristic.isNotifying) {
-//            bridge.onNoRegister()
-            intentToNotify = false
-        } else if (intentToNotify && characteristic.isNotifying) {
-            subscribedUUID = characteristic.uuid
-        }
+        print("CHARACTERISTIC VALUE: \(characteristic.value)")
     }
 }
