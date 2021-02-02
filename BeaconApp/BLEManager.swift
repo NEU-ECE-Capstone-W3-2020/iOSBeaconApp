@@ -264,25 +264,6 @@ class BLEManager: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate
         }
     }
     
-    var latencies: Array<Double> = Array(repeating: 0, count: 50)
-    var lastTimestamp : Double = 0
-    
-    var timestamps = Array<Double>()
-    
-    var rawData0 = Array<Double>()
-    var rawData1 = Array<Double>()
-    
-    var filteredData0 = Array<Double>()
-    var filteredData1 = Array<Double>()
-    
-    var fftData0 = [Array<Double>(), Array<Double>()]
-    var fftData1 = [Array<Double>(), Array<Double>()]
-    
-    var imuData0 = Array<Array<Double>>()
-    var imuData1 = Array<Array<Double>>()
-    
-    var count = 1
-    
     public func peripheral(_ peripheral: CBPeripheral, didUpdateValueFor characteristic: CBCharacteristic, error: Error?) {
         print("CHARACTERISTIC VALUE: \(characteristic.value)")
     }
