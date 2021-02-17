@@ -213,10 +213,9 @@ class BLEManager: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate
         }
     }
 
-    // TODO: ScanView, connection success
     func centralManager(_ central: CBCentralManager, didConnect peripheral: CBPeripheral) {
         self.isConnected = true
-        self.connectCallback!(true)
+//        self.connectCallback!(true)
         peripheral.discoverServices(nil)
     }
     
@@ -238,7 +237,6 @@ class BLEManager: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate
         } else {
             centralManager.connect(peripheral, options: nil)
         }
-        // TODO: Cleanup on disconnect in here, AppDelegate and Views
     }
     
     public func centralManager(_ central: CBCentralManager, willRestoreState dict: [String : Any]) {
@@ -250,21 +248,25 @@ class BLEManager: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate
     
     public func peripheral(_ peripheral: CBPeripheral, didDiscoverServices error: Error?) {
         for service in peripheral.services! {
+            print("Service: \(service.uuid.uuidString)")
             peripheral.discoverCharacteristics(nil, for: service)
         }
     }
     
     public func peripheral(_ peripheral: CBPeripheral, didDiscoverCharacteristicsFor service: CBService, error: Error?) {
         for characteristic in service.characteristics! {
-            // subscribe to Nordic Service
-            if (characteristic.uuid.uuidString == "6E400003-B5A3-F393-E0A9-E50E24DCCA9E") {
-                peripheral.setNotifyValue(true, for: characteristic)
-                self.subscribedUUID = CBUUID(string: "6E400003-B5A3-F393-E0A9-E50E24DCCA9E")
-            }
+            print("Characteristic: \(characteristic.uuid.uuidString)")
+            peripheral.readValue(for: characteristic)
         }
     }
     
     public func peripheral(_ peripheral: CBPeripheral, didUpdateValueFor characteristic: CBCharacteristic, error: Error?) {
-        print("CHARACTERISTIC VALUE: \(characteristic.value)")
+        if (characteristic.value != nil) {
+            print("Value for \(characteristic.uuid.uuidString): \(String(data: characteristic.value!, encoding: .ascii) ?? "<none>")")
+            if (characteristic.uuid.uuidString == "6E400003-B5A3-F393-E0A9-E50E24DCCA9E") {
+                let dat = "TEST STRING".data(using: .ascii)
+                peripheral.writeValue(dat!, for: characteristic, type: .withResponse)
+            }
+        }
     }
 }

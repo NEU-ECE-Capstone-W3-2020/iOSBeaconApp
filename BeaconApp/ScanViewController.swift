@@ -53,12 +53,10 @@ class ScanViewController: UIViewController, UITableViewDelegate, UITableViewData
                 self.pairedPeripheral  = self.ble.connectingPeripheral
                 self.pairedDevice?.address = self.ble.connectingUUID?.uuidString ?? " "
                 self.pairedDevice?.peripheral = self.pairedPeripheral
-                //update UI
                
-                DispatchQueue.main.async {
-                    self.scanButton.isHidden = true
-                    self.disconnectButton.isHidden = false
-                    
+                DispatchQueue.main.async { [self] in
+                    scanButton.isHidden = true
+                    disconnectButton.isHidden = false
                 }
                 
             } else {
