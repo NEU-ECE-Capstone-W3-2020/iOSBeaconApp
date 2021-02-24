@@ -1,7 +1,7 @@
 import UIKit
 import CoreBluetooth
 
-class ScanViewController: UIViewController, UITableViewDelegate, UITableViewDataSource {
+class ScanViewController: UIViewController, UITableViewDelegate, UITableViewDataSource, UITextFieldDelegate {
     var ble = BLEManager()
     var pairedDevice: BeaconDevice?
     var pairedPeripheral: CBPeripheral?
@@ -11,6 +11,7 @@ class ScanViewController: UIViewController, UITableViewDelegate, UITableViewData
     @IBOutlet weak var deviceList: UITableView!
     @IBOutlet weak var disconnectButton: UIButton!
     @IBOutlet weak var scanButton: UIButton!
+    @IBOutlet weak var textField: UITextField!
     //var selectedDeviceName: String?
     
     
@@ -22,6 +23,11 @@ class ScanViewController: UIViewController, UITableViewDelegate, UITableViewData
         }
         disconnectButton.isHidden = !ble.isConnected
         scanButton.isHidden = ble.isConnected
+        
+        textField.isHidden = !ble.isConnected
+        textField.delegate = self
+        self.view.addSubview(textField)
+        
         deviceList.dataSource = self
         deviceList.delegate = self
         deviceList.register(UITableViewCell.self, forCellReuseIdentifier: "deviceName")
@@ -46,7 +52,7 @@ class ScanViewController: UIViewController, UITableViewDelegate, UITableViewData
         
         ble.connectToDevice(name: deviceName, connect: { (success) -> Void in
             if (success) {
-                
+                print("success?")
                 self.pairedDevice?.isConnected = true
                
                 self.pairedDevice?.name = deviceName
@@ -57,6 +63,9 @@ class ScanViewController: UIViewController, UITableViewDelegate, UITableViewData
                 DispatchQueue.main.async { [self] in
                     scanButton.isHidden = true
                     disconnectButton.isHidden = false
+                    self.textField.isHidden = false
+                    self.textField.placeholder = self.ble.ourCharacteristicValue
+                    self.deviceList.isHidden = true
                 }
                 
             } else {
@@ -68,9 +77,12 @@ class ScanViewController: UIViewController, UITableViewDelegate, UITableViewData
                 //Switch back to the scan button, set the connected device to nil
                 self.disconnectButton.isHidden = true
                 self.scanButton.isHidden = false
+                self.textField.isHidden = true
+                self.textField.placeholder = self.ble.ourCharacteristicValue
+                self.deviceList.isHidden = false
             }
         }
-        )
+    )
         
         if pairedPeripheral != nil{
             pairedDevice = BeaconDevice(isConnected: true, deviceName: pairedPeripheral?.name ?? "noname", deviceAddress:  pairedPeripheral?.identifier.uuidString ?? "noid",peripheral: pairedPeripheral!)
@@ -99,6 +111,22 @@ class ScanViewController: UIViewController, UITableViewDelegate, UITableViewData
         cell.backgroundColor = UIColor.black
         cell.textLabel?.textColor = UIColor.white
         return cell
+    }
+    
+    // MARK: - UITextFieldDelegate
+    
+    public func textFieldDidBeginEditing(_ textField: UITextField) {
+        textField.placeholder = ble.ourCharacteristicValue
+    }
+    
+    public func textFieldShouldReturn(_ textField: UITextField) -> Bool {
+        self.textField.resignFirstResponder()
+        return true
+    }
+    
+    public func textFieldDidEndEditing(_ textField: UITextField) {
+        print("fjfdsjflsdkfjlsad")
+        ble.updateCharVal(val: textField.text ?? "<error>")
     }
 }
 

@@ -16,6 +16,7 @@ class BLEManager: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate
     var isConnected: Bool = false
     var isSetup: Bool = false
     var isInBackground: Bool = false
+    var notifyCharacteristic: CBCharacteristic!
     
     public func setup() {
         centralManager = CBCentralManager(delegate: self, queue: dispatchQueue, options: [CBCentralManagerOptionRestoreIdentifierKey : "Capstone"])
@@ -56,7 +57,7 @@ class BLEManager: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate
     }
     
     public func scanForDevices(timeOut: Double, discovered: @escaping (String) -> Void) {
-        self.discoverCallback = discovered
+    self.discoverCallback = discovered
         centralManager.scanForPeripherals(withServices: [CBUUID(string:
             // Nordic BLE service
             "6E400001-B5A3-F393-E0A9-E50E24DCCA9E")], options: nil)
@@ -83,6 +84,8 @@ class BLEManager: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate
         intendedName = name
         
         self.scanForDevices()
+        
+        connect(true)
     }
     
     public func populateServices(uuid: CBUUID) {
@@ -216,6 +219,7 @@ class BLEManager: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate
     func centralManager(_ central: CBCentralManager, didConnect peripheral: CBPeripheral) {
         self.isConnected = true
 //        self.connectCallback!(true)
+        self.connectingPeripheral = peripheral
         peripheral.discoverServices(nil)
     }
     
@@ -253,20 +257,53 @@ class BLEManager: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate
         }
     }
     
+    var rxCharacteristic: CBCharacteristic!
+    
     public func peripheral(_ peripheral: CBPeripheral, didDiscoverCharacteristicsFor service: CBService, error: Error?) {
         for characteristic in service.characteristics! {
             print("Characteristic: \(characteristic.uuid.uuidString)")
-            peripheral.readValue(for: characteristic)
+            switch characteristic.properties {
+                case .indicate:
+                    print("indicate")
+                case .notify:
+                    print("notify")
+                case .write:
+                    print("write")
+                case .writeWithoutResponse:
+                    print("writeWithoutResponse")
+                case .read:
+                    print("read")
+                    peripheral.readValue(for: characteristic)
+                default:
+                    print("unknown")
+            }
+            
+            if (characteristic.uuid.uuidString == "6E400002-B5A3-F393-E0A9-E50E24DCCA9E") {
+                rxCharacteristic = characteristic
+            }
         }
     }
     
+    var ourCharacteristicValue = "<no data>"
+    
     public func peripheral(_ peripheral: CBPeripheral, didUpdateValueFor characteristic: CBCharacteristic, error: Error?) {
-        if (characteristic.value != nil) {
-            print("Value for \(characteristic.uuid.uuidString): \(String(data: characteristic.value!, encoding: .ascii) ?? "<none>")")
+        if characteristic.value != nil {
             if (characteristic.uuid.uuidString == "6E400003-B5A3-F393-E0A9-E50E24DCCA9E") {
-                let dat = "TEST STRING".data(using: .ascii)
-                peripheral.writeValue(dat!, for: characteristic, type: .withResponse)
+                if let cv = characteristic.value {
+                    ourCharacteristicValue = String(data: cv, encoding: .ascii) ?? ourCharacteristicValue
+                    print(ourCharacteristicValue)
+                }
             }
         }
+    }
+    
+    public func peripheral(_ peripheral: CBPeripheral, didWriteValueFor characteristic: CBCharacteristic, error: Error?) {
+        print("Wrote value to characteristic \(characteristic.uuid.uuidString)")
+//        peripheral.readValue(for: characteristic)
+    }
+    
+    public func updateCharVal(val: String) {
+        self.ourCharacteristicValue = val
+        self.connectingPeripheral.writeValue(val.data(using: .ascii)!, for: rxCharacteristic, type: .withResponse)
     }
 }
