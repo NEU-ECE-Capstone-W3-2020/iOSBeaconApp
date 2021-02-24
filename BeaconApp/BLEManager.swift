@@ -258,6 +258,7 @@ class BLEManager: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate
     }
     
     var rxCharacteristic: CBCharacteristic!
+    var txCharacteristic: CBCharacteristic!
     
     public func peripheral(_ peripheral: CBPeripheral, didDiscoverCharacteristicsFor service: CBService, error: Error?) {
         for characteristic in service.characteristics! {
@@ -289,17 +290,24 @@ class BLEManager: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate
     public func peripheral(_ peripheral: CBPeripheral, didUpdateValueFor characteristic: CBCharacteristic, error: Error?) {
         if characteristic.value != nil {
             if (characteristic.uuid.uuidString == "6E400003-B5A3-F393-E0A9-E50E24DCCA9E") {
+                txCharacteristic = characteristic
                 if let cv = characteristic.value {
                     ourCharacteristicValue = String(data: cv, encoding: .ascii) ?? ourCharacteristicValue
                     print(ourCharacteristicValue)
+                    gotNewCharVal(newVal: ourCharacteristicValue)
                 }
             }
         }
     }
     
+    public func gotNewCharVal(newVal: String) {
+        print("Posting notification to UI")
+        NotificationCenter.default.post(name: NSNotification.Name("gotNewCharVal"), object: newVal)
+    }
+    
     public func peripheral(_ peripheral: CBPeripheral, didWriteValueFor characteristic: CBCharacteristic, error: Error?) {
         print("Wrote value to characteristic \(characteristic.uuid.uuidString)")
-//        peripheral.readValue(for: characteristic)
+        peripheral.readValue(for: txCharacteristic)
     }
     
     public func updateCharVal(val: String) {

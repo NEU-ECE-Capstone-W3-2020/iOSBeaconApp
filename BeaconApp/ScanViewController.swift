@@ -12,6 +12,7 @@ class ScanViewController: UIViewController, UITableViewDelegate, UITableViewData
     @IBOutlet weak var disconnectButton: UIButton!
     @IBOutlet weak var scanButton: UIButton!
     @IBOutlet weak var textField: UITextField!
+    @IBOutlet weak var charValueLabel: UILabel!
     //var selectedDeviceName: String?
     
     
@@ -27,10 +28,13 @@ class ScanViewController: UIViewController, UITableViewDelegate, UITableViewData
         textField.isHidden = !ble.isConnected
         textField.delegate = self
         self.view.addSubview(textField)
+        charValueLabel.isHidden = true
         
         deviceList.dataSource = self
         deviceList.delegate = self
         deviceList.register(UITableViewCell.self, forCellReuseIdentifier: "deviceName")
+        
+        NotificationCenter.default.addObserver(self, selector:#selector(newCharVal(_:)), name: NSNotification.Name("gotNewCharVal"), object: nil)
     }
     
     @IBAction func scanButton(_ sender: Any) {
@@ -42,6 +46,13 @@ class ScanViewController: UIViewController, UITableViewDelegate, UITableViewData
                 self.deviceList.reloadData()
             }
         })
+    }
+    
+    @objc func newCharVal(_ notification: Notification) {
+        DispatchQueue.main.async {
+            print(notification.object)
+            self.charValueLabel.text = notification.object as! String
+        }
     }
     
     func tableView(_ tableView: UITableView, didSelectRowAt indexPath: IndexPath) {
@@ -66,8 +77,8 @@ class ScanViewController: UIViewController, UITableViewDelegate, UITableViewData
                     self.textField.isHidden = false
                     self.textField.placeholder = self.ble.ourCharacteristicValue
                     self.deviceList.isHidden = true
+                    self.charValueLabel.isHidden = false
                 }
-                
             } else {
                 print("todo")
             }
@@ -80,6 +91,7 @@ class ScanViewController: UIViewController, UITableViewDelegate, UITableViewData
                 self.textField.isHidden = true
                 self.textField.placeholder = self.ble.ourCharacteristicValue
                 self.deviceList.isHidden = false
+                self.charValueLabel.isHidden = true
             }
         }
     )
